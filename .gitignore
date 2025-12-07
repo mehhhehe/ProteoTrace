@@ -1,6 +1,7 @@
 data/
 .config/
-
+models/
+models_strong/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
