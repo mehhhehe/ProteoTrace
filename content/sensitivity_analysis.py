@@ -12,8 +12,11 @@ import torch
 
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
 from train import train_gnn
-from shap_analysis import build_graphsage_encoder, compute_embeddings
-from train_hybrid import train_hybrid_classifier
+from train_hybrid import (
+    build_graphsage_encoder,
+    compute_embeddings,
+    train_hybrid_classifier,
+)
 
 
 def run_gnn_and_hybrid_sensitivity(
@@ -32,14 +35,17 @@ def run_gnn_and_hybrid_sensitivity(
 ) -> List[Dict]:
     """
     Hyperparameter sensitivity for BOTH:
-      - pure GraphSAGE
-      - hybrid GraphSAGE+XGBoost
+      - pure GraphSAGE (train_gnn)
+      - hybrid GraphSAGE+XGBoost (train_hybrid_classifier from train_hybrid.py)
 
     For each value in `values`, we:
-      1) Train GraphSAGE with that hyperparameter setting
-      2) Build an encoder from the resulting checkpoint
-      3) Compute embeddings and train an XGBoost hybrid classifier
+      1) Train GraphSAGE with that hyperparameter setting and save checkpoint +
+         probability matrices in a per-config subdirectory.
+      2) Load the GraphSAGE checkpoint as an encoder (build_graphsage_encoder).
+      3) Compute embeddings (compute_embeddings) and train an XGBoost hybrid
+         classifier on top (train_hybrid_classifier).
     """
+    # Load once; reused across configs
     graph, labels, split_idx = load_raw_ogbn_proteins(root)
     features = aggregate_edge_features(graph, method=agg_method, add_degree=add_degree)
 
@@ -50,7 +56,7 @@ def run_gnn_and_hybrid_sensitivity(
     results: List[Dict] = []
 
     for v in values:
-        # Copy the baseline configuration
+        # Start from baseline configuration
         hdim = hidden_dim
         nlayers = num_layers
         nneigh = list(num_neighbors)
@@ -62,6 +68,9 @@ def run_gnn_and_hybrid_sensitivity(
             hdim = int(v)
         elif param == "num_layers":
             nlayers = int(v)
+            # keep num_neighbors length consistent if user only passed one value
+            if len(nneigh) == 1:
+                nneigh = [nneigh[0]] * nlayers
         elif param == "num_neighbors":
             # same neighbour count for each layer
             nneigh = [int(v)] * nlayers
@@ -136,7 +145,7 @@ def run_gnn_and_hybrid_sensitivity(
         result = {
             "analysis": "gnn_hybrid_sensitivity",
             "param": param,
-            "param_value": v,
+            "param_value": int(v),
             # full config used
             "hidden_dim": int(hdim),
             "num_layers": int(nlayers),
@@ -203,17 +212,17 @@ def main() -> None:
     )
 
     # Baseline configuration around which we vary one parameter
-    parser.add_argument("--hidden_dim", type=int, default=128)
-    parser.add_argument("--num_layers", type=int, default=3)
+    parser.add_argument("--hidden_dim", type=int, default=64)
+    parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument(
         "--num_neighbors",
         type=int,
         nargs="+",
-        default=[25, 15, 10],
+        default=[10, 10],
         help="Baseline neighbour sampling sizes.",
     )
-    parser.add_argument("--batch_size", type=int, default=1024)
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=5)
 
     args = parser.parse_args()
 
