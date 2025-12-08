@@ -12,9 +12,11 @@ import torch
 
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
 from train import train_gnn
+from shap_analysis import build_graphsage_encoder, compute_embeddings
+from train_hybrid import train_hybrid_classifier
 
 
-def run_gnn_sensitivity(
+def run_gnn_and_hybrid_sensitivity(
     root: str,
     model_dir: str,
     agg_method: str,
@@ -29,11 +31,14 @@ def run_gnn_sensitivity(
     device: torch.device,
 ) -> List[Dict]:
     """
-    Run a hyperparameter sensitivity analysis for the GraphSAGE model.
+    Hyperparameter sensitivity for BOTH:
+      - pure GraphSAGE
+      - hybrid GraphSAGE+XGBoost
 
-    For each value in ``values`` we re-train GraphSAGE with that parameter
-    changed and record validation / test ROC-AUC. All other hyperparameters
-    are kept fixed.
+    For each value in `values`, we:
+      1) Train GraphSAGE with that hyperparameter setting
+      2) Build an encoder from the resulting checkpoint
+      3) Compute embeddings and train an XGBoost hybrid classifier
     """
     graph, labels, split_idx = load_raw_ogbn_proteins(root)
     features = aggregate_edge_features(graph, method=agg_method, add_degree=add_degree)
@@ -52,6 +57,7 @@ def run_gnn_sensitivity(
         bs = batch_size
         nepochs = epochs
 
+        # Override the chosen parameter
         if param == "hidden_dim":
             hdim = int(v)
         elif param == "num_layers":
@@ -76,7 +82,14 @@ def run_gnn_sensitivity(
             f"batch_size={bs}, epochs={nepochs})"
         )
 
-        _, _, _, val_auc, test_auc = train_gnn(
+        # --- 1) Train GraphSAGE for this configuration ---
+        (
+            _train_probs_gnn,
+            _val_probs_gnn,
+            _test_probs_gnn,
+            val_auc_gnn,
+            test_auc_gnn,
+        ) = train_gnn(
             graph=graph,
             features=features,
             labels=labels,
@@ -92,19 +105,54 @@ def run_gnn_sensitivity(
             device=device,
         )
 
+        # --- 2) Build encoder and compute embeddings for hybrid ---
+        hybrid_val_auc = float("nan")
+        hybrid_test_auc = float("nan")
+        hybrid_error: str | None = None
+
+        try:
+            encoder = build_graphsage_encoder(
+                input_dim=features.shape[1],
+                hidden_dim=hdim,
+                num_layers=nlayers,
+                model_dir=cfg_model_dir,
+                device=device,
+            )
+            Z = compute_embeddings(encoder, features, graph, device=device)
+
+            hybrid_val_auc, hybrid_test_auc = train_hybrid_classifier(
+                Z,
+                labels,
+                train_idx,
+                val_idx,
+                test_idx,
+                classifier="xgb",
+                model_dir=cfg_model_dir,
+            )
+        except ImportError as e:
+            # xgboost not installed
+            hybrid_error = str(e)
+
         result = {
-            "analysis": "gnn_hyperparam_sensitivity",
+            "analysis": "gnn_hybrid_sensitivity",
             "param": param,
             "param_value": v,
-            "val_auc": float(val_auc),
-            "test_auc": float(test_auc),
-            # record full config used
+            # full config used
             "hidden_dim": int(hdim),
             "num_layers": int(nlayers),
             "num_neighbors": [int(x) for x in nneigh],
             "batch_size": int(bs),
             "epochs": int(nepochs),
+            # GNN metrics
+            "gnn_val_auc": float(val_auc_gnn),
+            "gnn_test_auc": float(test_auc_gnn),
+            # Hybrid metrics (XGB)
+            "hybrid_xgb_val_auc": float(hybrid_val_auc),
+            "hybrid_xgb_test_auc": float(hybrid_test_auc),
         }
+        if hybrid_error is not None:
+            result["hybrid_xgb_error"] = hybrid_error
+
         results.append(result)
 
     return results
@@ -112,7 +160,7 @@ def run_gnn_sensitivity(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hyperparameter sensitivity analysis for GraphSAGE on ogbn-proteins."
+        description="Hyperparameter sensitivity for GraphSAGE and hybrid XGB on ogbn-proteins."
     )
     parser.add_argument(
         "--root",
@@ -154,19 +202,9 @@ def main() -> None:
         help="List of values to evaluate for the chosen parameter.",
     )
 
-    # Baseline configuration (around which we vary one parameter)
-    parser.add_argument(
-        "--hidden_dim",
-        type=int,
-        default=128,
-        help="Baseline hidden dimension for GraphSAGE.",
-    )
-    parser.add_argument(
-        "--num_layers",
-        type=int,
-        default=3,
-        help="Baseline number of GraphSAGE layers.",
-    )
+    # Baseline configuration around which we vary one parameter
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--num_layers", type=int, default=3)
     parser.add_argument(
         "--num_neighbors",
         type=int,
@@ -174,18 +212,8 @@ def main() -> None:
         default=[25, 15, 10],
         help="Baseline neighbour sampling sizes.",
     )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1024,
-        help="Baseline batch size for neighbour sampling.",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=30,
-        help="Baseline number of training epochs.",
-    )
+    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--epochs", type=int, default=30)
 
     args = parser.parse_args()
 
@@ -194,7 +222,7 @@ def main() -> None:
 
     add_degree = not args.no_add_degree
 
-    results = run_gnn_sensitivity(
+    results = run_gnn_and_hybrid_sensitivity(
         root=args.root,
         model_dir=args.model_dir,
         agg_method=args.agg_method,
