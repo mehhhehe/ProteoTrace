@@ -2,12 +2,13 @@
 """
 plot_analysis_diagrams.py
 
-Generate all key diagrams (SHAP, ablation performance, significance tests)
-from the outputs produced by:
+Generate all key diagrams (SHAP, ablation, significance tests, and
+hyperparameter sensitivity) from the outputs produced by:
 
   - shap_analysis.py
   - ablation_study.py
   - significance_tests.py
+  - sensitivity_analysis.py
   - aggregate_analysis.py   (for file locations / structure only)
 
 This script assumes you have already run the numeric pipeline, e.g.:
@@ -22,7 +23,12 @@ This script assumes you have already run the numeric pipeline, e.g.:
       --num_neighbors 25 15 10 \
       --epochs 30
 
-and now want figures for the report.
+and (optionally) a sensitivity run such as:
+
+  python sensitivity_analysis.py \
+      --root ./data \
+      --model_dir ./models_main \
+      --param hidden_dim --values 64 128 256 512
 
 Outputs are written under:
 
@@ -30,6 +36,7 @@ Outputs are written under:
       shap/
       ablation/
       significance/
+      sensitivity/
 """
 
 from __future__ import annotations
@@ -38,12 +45,12 @@ import argparse
 import glob
 import json
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
 import matplotlib
-matplotlib.use("Agg")  # headless backends (e.g. servers, notebooks without display)
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
@@ -74,14 +81,6 @@ def plot_shap_global_importance(
     top_k: int,
     out_dir: str,
 ) -> Optional[str]:
-    """
-    Plot a bar chart of top-k global SHAP feature importances.
-
-    Expects files produced by shap_analysis.py:
-
-      root_dir/shap/{model_tag}_global_importance.npy
-      root_dir/shap/{model_tag}_shap_summary.json
-    """
     shap_dir = os.path.join(root_dir, "shap")
     global_path = os.path.join(shap_dir, f"{model_tag}_global_importance.npy")
     summary_path = os.path.join(shap_dir, f"{model_tag}_shap_summary.json")
@@ -92,12 +91,11 @@ def plot_shap_global_importance(
 
     global_imp = np.load(global_path)
     d = global_imp.shape[0]
-
     k = min(top_k, d)
+
     indices = np.argsort(global_imp)[::-1][:k]
     values = global_imp[indices]
 
-    # Optional: get split info from summary
     split = "?"
     summary = load_json(summary_path)
     if summary is not None:
@@ -127,15 +125,6 @@ def plot_shap_per_label_heatmap(
     max_labels: int,
     out_dir: str,
 ) -> Optional[str]:
-    """
-    Heatmap of per-label SHAP importances restricted to the top-k
-    globally important features.
-
-    Expects:
-
-      root_dir/shap/{model_tag}_global_importance.npy
-      root_dir/shap/{model_tag}_per_label_importance.npy
-    """
     shap_dir = os.path.join(root_dir, "shap")
     global_path = os.path.join(shap_dir, f"{model_tag}_global_importance.npy")
     per_label_path = os.path.join(shap_dir, f"{model_tag}_per_label_importance.npy")
@@ -145,14 +134,14 @@ def plot_shap_per_label_heatmap(
         return None
 
     global_imp = np.load(global_path)
-    per_label = np.load(per_label_path)  # shape [n_labels, d]
+    per_label = np.load(per_label_path)  # [n_labels, d]
 
     n_labels, d = per_label.shape
     k_feat = min(top_k_features, d)
     k_labels = min(max_labels, n_labels)
 
     top_feat_indices = np.argsort(global_imp)[::-1][:k_feat]
-    submatrix = per_label[:k_labels, :][:, top_feat_indices]  # [k_labels, k_feat]
+    submatrix = per_label[:k_labels, :][:, top_feat_indices]
 
     ensure_dir(out_dir)
     fig_path = os.path.join(out_dir, f"{model_tag}_heatmap_labels{k_labels}_feat{k_feat}.png")
@@ -190,19 +179,8 @@ def generate_shap_figures(
     ensure_dir(shap_fig_dir)
 
     print(f"[SHAP] Generating SHAP plots for tag={model_tag}")
-    plot_shap_global_importance(
-        root_dir=root_dir,
-        model_tag=model_tag,
-        top_k=top_k,
-        out_dir=shap_fig_dir,
-    )
-    plot_shap_per_label_heatmap(
-        root_dir=root_dir,
-        model_tag=model_tag,
-        top_k_features=top_k,
-        max_labels=max_labels,
-        out_dir=shap_fig_dir,
-    )
+    plot_shap_global_importance(root_dir, model_tag, top_k, shap_fig_dir)
+    plot_shap_per_label_heatmap(root_dir, model_tag, top_k, max_labels, shap_fig_dir)
 
 
 # ---------------------------------------------------------------------
@@ -211,12 +189,6 @@ def generate_shap_figures(
 
 
 def generate_ablation_figures(root_dir: str, figures_root: str) -> None:
-    """
-    Generate diagrams from ablation_results.json:
-
-      - Baseline configs: val/test ROC-AUC by configuration
-      - GNN + Hybrid configs: GNN vs Hybrid-XGB test ROC-AUC
-    """
     ablation_path = os.path.join(root_dir, "ablation_results.json")
     if not os.path.exists(ablation_path):
         print(f"[ABLATION] No ablation_results.json found at {ablation_path}. Skipping.")
@@ -235,7 +207,6 @@ def generate_ablation_figures(root_dir: str, figures_root: str) -> None:
     ablation_fig_dir = os.path.join(figures_root, "ablation")
     ensure_dir(ablation_fig_dir)
 
-    # ---- Baseline configurations ----
     if baseline_cfgs:
         names = [cfg.get("config_name", "?") for cfg in baseline_cfgs]
         val_auc = [cfg.get("val_auc", np.nan) for cfg in baseline_cfgs]
@@ -259,7 +230,6 @@ def generate_ablation_figures(root_dir: str, figures_root: str) -> None:
 
         print(f"[ABLATION] Baseline AUC figure saved to {fig_path}")
 
-    # ---- GNN + Hybrid configurations ----
     if gnn_cfgs:
         names = [cfg.get("config_name", "?") for cfg in gnn_cfgs]
         gnn_test_auc = [cfg.get("gnn_test_auc", np.nan) for cfg in gnn_cfgs]
@@ -290,14 +260,6 @@ def generate_ablation_figures(root_dir: str, figures_root: str) -> None:
 
 
 def generate_significance_figures(root_dir: str, figures_root: str) -> None:
-    """
-    For each significance_results_*.json file, create an errorbar figure
-    showing AUC differences and bootstrap confidence intervals.
-
-    Each JSON file is expected to be a list of dicts with keys:
-
-      model_a, model_b, mean_diff_auc, ci_low, ci_high, ...
-    """
     sig_paths = glob.glob(os.path.join(root_dir, "significance_results_*.json"))
     if not sig_paths:
         print("[SIG] No significance_results_*.json files found. Skipping.")
@@ -348,7 +310,7 @@ def generate_significance_figures(root_dir: str, figures_root: str) -> None:
             fmt="o",
             capsize=4,
         )
-        plt.axvline(0.0, color="grey", linestyle="--", linewidth=1)
+        plt.axvline(0.0, linestyle="--", linewidth=1)
         plt.yticks(y_pos, labels)
         plt.xlabel("Mean AUC difference (model_b - model_a)")
         plt.title(f"AUC differences with bootstrap CIs (split={split})")
@@ -360,14 +322,75 @@ def generate_significance_figures(root_dir: str, figures_root: str) -> None:
 
 
 # ---------------------------------------------------------------------
+# Sensitivity plots
+# ---------------------------------------------------------------------
+
+
+def generate_sensitivity_figures(root_dir: str, figures_root: str) -> None:
+    """
+    Generate hyperparameter sensitivity diagrams from
+        sensitivity_results_*.json
+    produced by sensitivity_analysis.py.
+    """
+    sens_paths = glob.glob(os.path.join(root_dir, "sensitivity_results_*.json"))
+    if not sens_paths:
+        print("[SENS] No sensitivity_results_*.json files found. Skipping.")
+        return
+
+    sens_fig_dir = os.path.join(figures_root, "sensitivity")
+    ensure_dir(sens_fig_dir)
+
+    for path in sens_paths:
+        filename = os.path.basename(path)
+        param = filename.replace("sensitivity_results_", "").replace(".json", "")
+
+        with open(path, "r") as f:
+            res_list = json.load(f)
+
+        if not res_list:
+            print(f"[SENS] Empty results in {path}, skipping.")
+            continue
+
+        vals = []
+        val_auc = []
+        test_auc = []
+        for res in res_list:
+            vals.append(res.get("param_value"))
+            val_auc.append(res.get("val_auc", np.nan))
+            test_auc.append(res.get("test_auc", np.nan))
+
+        order = np.argsort(np.array(vals, dtype=float))
+        vals_sorted = [vals[i] for i in order]
+        val_auc_sorted = [val_auc[i] for i in order]
+        test_auc_sorted = [test_auc[i] for i in order]
+
+        fig_path = os.path.join(sens_fig_dir, f"sensitivity_{param}.png")
+
+        plt.figure(figsize=(6, 4))
+        plt.plot(vals_sorted, val_auc_sorted, marker="o", label="Val AUC")
+        plt.plot(vals_sorted, test_auc_sorted, marker="s", label="Test AUC")
+        plt.xlabel(param)
+        plt.ylabel("Macro ROC-AUC")
+        plt.title(f"Hyperparameter sensitivity: {param}")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(fig_path, dpi=300)
+        plt.close()
+
+        print(f"[SENS] Sensitivity figure for param={param} saved to {fig_path}")
+
+
+# ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate SHAP, ablation, and significance diagrams "
-        "from existing BioGraphFusion / ogbn-proteins analysis artefacts."
+        description=(
+            "Generate SHAP, ablation, significance, and sensitivity diagrams "
+            "from existing BioGraphFusion / ogbn-proteins analysis artefacts."
+        )
     )
 
     parser.add_argument(
@@ -380,15 +403,14 @@ def main() -> None:
             "Typically this is the same as --model_dir in orchestrate_pipeline.py."
         ),
     )
-
-    # SHAP options
     parser.add_argument(
         "--shap_model_tag",
         type=str,
         default="graphsage_xgb",
         help=(
             "Which hybrid model tag to use for SHAP plots "
-            "(must match the tag used in shap_analysis.py, e.g. 'graphsage_xgb' or 'graphsage_rf')."
+            "(must match the tag used in shap_analysis.py, "
+            "e.g. 'graphsage_xgb' or 'graphsage_rf')."
         ),
     )
     parser.add_argument(
@@ -413,7 +435,6 @@ def main() -> None:
     print(f"[MAIN] Root analysis dir: {root_dir}")
     print(f"[MAIN] Figures will be written under: {figures_root}")
 
-    # 1) SHAP diagrams
     generate_shap_figures(
         root_dir=root_dir,
         model_tag=args.shap_model_tag,
@@ -422,11 +443,9 @@ def main() -> None:
         figures_root=figures_root,
     )
 
-    # 2) Ablation diagrams
     generate_ablation_figures(root_dir=root_dir, figures_root=figures_root)
-
-    # 3) Significance diagrams
     generate_significance_figures(root_dir=root_dir, figures_root=figures_root)
+    generate_sensitivity_figures(root_dir=root_dir, figures_root=figures_root)
 
     print("[MAIN] Diagram generation complete.")
 
