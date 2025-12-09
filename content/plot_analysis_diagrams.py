@@ -328,47 +328,70 @@ def generate_significance_figures(root_dir: str, figures_root: str) -> None:
 
 def generate_sensitivity_figures(root_dir: str, figures_root: str) -> None:
     """
-    Generate hyperparameter sensitivity diagrams from
-        sensitivity_results_*.json
-    produced by sensitivity_analysis.py.
+    Generate hyperparameter sensitivity diagrams from `sensitivity.json`
+    produced by collect_sensitivity_from_saved.py.
+
+    Expects a list of dicts, each with at least:
+      - param            (e.g. "hidden_dim")
+      - param_value      (e.g. 32, 64, 128, 256)
+      - gnn_val_auc
+      - gnn_test_auc
+      - hybrid_xgb_val_auc  (may be None)
+      - hybrid_xgb_test_auc (may be None)
     """
-    sens_paths = glob.glob(os.path.join(root_dir, "sensitivity_results_*.json"))
-    if not sens_paths:
-        print("[SENS] No sensitivity_results_*.json files found. Skipping.")
+    sens_path = os.path.join(root_dir, "sensitivity.json")
+    if not os.path.exists(sens_path):
+        print(f"[SENS] No sensitivity.json found at {sens_path}. Skipping.")
+        return
+
+    with open(sens_path, "r") as f:
+        all_results = json.load(f)
+
+    if not all_results:
+        print("[SENS] sensitivity.json is empty. Skipping.")
         return
 
     sens_fig_dir = os.path.join(figures_root, "sensitivity")
-    ensure_dir(sens_fig_dir)
+    os.makedirs(sens_fig_dir, exist_ok=True)
 
-    for path in sens_paths:
-        filename = os.path.basename(path)
-        param = filename.replace("sensitivity_results_", "").replace(".json", "")
+    # Group entries by param (e.g. hidden_dim, num_layers, ...)
+    by_param = {}
+    for entry in all_results:
+        p = entry.get("param", "unknown")
+        by_param.setdefault(p, []).append(entry)
 
-        with open(path, "r") as f:
-            res_list = json.load(f)
+    for param, entries in by_param.items():
+        # Sort entries by param_value
+        vals = [e["param_value"] for e in entries]
 
-        if not res_list:
-            print(f"[SENS] Empty results in {path}, skipping.")
-            continue
+        # Convert to float for sorting; fall back to original if needed
+        try:
+            order = np.argsort(np.array(vals, dtype=float))
+        except ValueError:
+            order = np.argsort(np.array([str(v) for v in vals]))
 
-        vals = []
-        val_auc = []
-        test_auc = []
-        for res in res_list:
-            vals.append(res.get("param_value"))
-            val_auc.append(res.get("val_auc", np.nan))
-            test_auc.append(res.get("test_auc", np.nan))
-
-        order = np.argsort(np.array(vals, dtype=float))
         vals_sorted = [vals[i] for i in order]
-        val_auc_sorted = [val_auc[i] for i in order]
-        test_auc_sorted = [test_auc[i] for i in order]
+
+        gnn_val = [entries[i].get("gnn_val_auc", np.nan) for i in order]
+        gnn_test = [entries[i].get("gnn_test_auc", np.nan) for i in order]
+        hyb_val = [entries[i].get("hybrid_xgb_val_auc", np.nan) for i in order]
+        hyb_test = [entries[i].get("hybrid_xgb_test_auc", np.nan) for i in order]
+
+        has_hybrid = not all(v is None or np.isnan(v) for v in hyb_val + hyb_test)
 
         fig_path = os.path.join(sens_fig_dir, f"sensitivity_{param}.png")
 
         plt.figure(figsize=(6, 4))
-        plt.plot(vals_sorted, val_auc_sorted, marker="o", label="Val AUC")
-        plt.plot(vals_sorted, test_auc_sorted, marker="s", label="Test AUC")
+        # GNN curves
+        plt.plot(vals_sorted, gnn_val, marker="o", label="GNN val AUC")
+        plt.plot(vals_sorted, gnn_test, marker="o", linestyle="--", label="GNN test AUC")
+
+        # Hybrid curves (if available)
+        if has_hybrid:
+            plt.plot(vals_sorted, hyb_val, marker="s", label="Hybrid-XGB val AUC")
+            plt.plot(vals_sorted, hyb_test, marker="s", linestyle="--",
+                     label="Hybrid-XGB test AUC")
+
         plt.xlabel(param)
         plt.ylabel("Macro ROC-AUC")
         plt.title(f"Hyperparameter sensitivity: {param}")
