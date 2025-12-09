@@ -212,17 +212,17 @@ def main() -> None:
     )
 
     # Baseline configuration around which we vary one parameter
-    parser.add_argument("--hidden_dim", type=int, default=64)
+    parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument(
         "--num_neighbors",
         type=int,
         nargs="+",
-        default=[10, 10],
+        default=[25, 10],
         help="Baseline neighbour sampling sizes.",
     )
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--epochs", type=int, default=20)
 
     args = parser.parse_args()
 

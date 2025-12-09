@@ -98,12 +98,27 @@ def main() -> None:
                         help="Batch size for ablation GNNs")
     parser.add_argument("--ablation_num_neighbors", type=int, nargs="+", default=[15, 15, 10],
                         help="Neighbours per layer for ablation GNNs")
+    
+    # Sensitivity-specific
+    parser.add_argument(
+        "--sens_param", type=str, default="hidden_dim",
+        choices=["hidden_dim", "num_layers", "num_neighbors", "batch_size", "epochs"],
+        help="Hyperparameter to vary in sensitivity analysis",
+    )
+    parser.add_argument(
+        "--sens_values", type=int, nargs="+", default=[64, 128, 256, 512],
+        help="Values to evaluate for the chosen sensitivity hyperparameter",
+    )
+
 
     # Stage toggles
+        # Stage toggles
     parser.add_argument("--skip_train", action="store_true",
                         help="Skip main training (train.py)")
     parser.add_argument("--skip_hybrid", action="store_true",
                         help="Skip hybrid training (train_hybrid.py)")
+    parser.add_argument("--skip_sensitivity", action="store_true",
+                        help="Skip sensitivity analysis")
     parser.add_argument("--skip_shap", action="store_true",
                         help="Skip SHAP analysis")
     parser.add_argument("--skip_ablation", action="store_true",
@@ -112,6 +127,7 @@ def main() -> None:
                         help="Skip significance tests")
     parser.add_argument("--skip_aggregate", action="store_true",
                         help="Skip aggregation of analysis outputs")
+
 
     args = parser.parse_args()
 
@@ -137,7 +153,7 @@ def main() -> None:
 
         run_cmd(cmd, "Main training (baseline + GraphSAGE)")
 
-    # 2. Train hybrid models on top of GraphSAGE embeddings
+        # 2. Train hybrid models on top of GraphSAGE embeddings
     if not args.skip_hybrid:
         cmd = [
             python_exe, "train_hybrid.py",
@@ -153,7 +169,29 @@ def main() -> None:
 
         run_cmd(cmd, "Hybrid training (GraphSAGE + classical models)")
 
-    # 3. SHAP analysis for chosen hybrid model
+    # 3. Sensitivity analysis (GraphSAGE and hybrid)
+    if not args.skip_sensitivity:
+        cmd = [
+            python_exe, "sensitivity_analysis.py",
+            "--root", args.root,
+            "--model_dir", args.model_dir,
+            "--agg_method", args.agg_method,
+            "--param", args.sens_param,
+            "--hidden_dim", str(args.hidden_dim),
+            "--num_layers", str(args.num_layers),
+            "--batch_size", str(args.batch_size),
+            "--epochs", str(args.epochs),
+        ]
+        # num_neighbors is a list
+        cmd.extend(["--num_neighbors"] + [str(n) for n in args.num_neighbors])
+        # sensitivity values to sweep
+        cmd.extend(["--values"] + [str(v) for v in args.sens_values])
+        if args.no_add_degree:
+            cmd.append("--no_add_degree")
+
+        run_cmd(cmd, f"Sensitivity analysis for {args.sens_param}")
+
+    # 4. SHAP analysis for chosen hybrid model
     if not args.skip_shap:
         cmd = [
             python_exe, "shap_analysis.py",
@@ -172,7 +210,8 @@ def main() -> None:
 
         run_cmd(cmd, f"SHAP analysis for {args.shap_model_tag}")
 
-    # 4. Ablation study (results also stored under model_dir)
+
+    # 5. Ablation study (results also stored under model_dir)
     if not args.skip_ablation:
         cmd = [
             python_exe, "ablation_study.py",
@@ -185,7 +224,7 @@ def main() -> None:
 
         run_cmd(cmd, "Ablation study")
 
-    # 5. Statistical significance tests
+    # 6. Statistical significance tests
     if not args.skip_significance:
         cmd = [
             python_exe, "significance_tests.py",
@@ -197,7 +236,7 @@ def main() -> None:
         ]
         run_cmd(cmd, f"Significance tests on {args.sig_split} split")
 
-    # 6. Aggregate all available analysis artefacts
+    # 7. Aggregate all available analysis artefacts
     if not args.skip_aggregate:
         cmd = [
             python_exe, "aggregate_analysis.py",

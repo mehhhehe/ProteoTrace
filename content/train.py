@@ -316,11 +316,11 @@ def main() -> None:
     parser.add_argument("--model_dir", type=str, required=True, help="Directory to save models and predictions")
     parser.add_argument("--agg_method", type=str, default="mean", choices=["mean", "sum"], help="Edge feature aggregation method")
     parser.add_argument("--no_add_degree", action="store_true", help="Do not append degree and log-degree features")
-    parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension for GraphSAGE")
+    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension for GraphSAGE")
     parser.add_argument("--num_layers", type=int, default=2, help="Number of GraphSAGE layers")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size for neighbour sampling")
-    parser.add_argument("--num_neighbors", type=int, nargs='+', default=[10, 10], help="Number of sampled neighbours per GNN layer")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for neighbour sampling")
+    parser.add_argument("--num_neighbors", type=int, nargs='+', default=[25, 10], help="Number of sampled neighbours per GNN layer")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
     args = parser.parse_args()
 
     # Load raw graph and labels

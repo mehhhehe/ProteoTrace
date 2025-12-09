@@ -65,3 +65,31 @@ python train_hybrid.py \
 [Hybrid] Training graphsage_xgb on embeddings with shape (86619, 256)
 [Hybrid] graphsage_xgb: val_auc=0.7851, test_auc=0.6908
 --------------------------------------------------------------------------------------------------------------
+
+!!!! outperforms baselines
+
+[Sensitivity] Running config hidden_dim=128 (hidden_dim=128, layers=2, neigh=[25, 10], batch_size=256, epochs=20)
+/home/mehman_1919_0839/ogbn_proj/venv/lib/python3.11/site-packages/torch_geometric/loader/neighbor_loader.py:229: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling
+  neighbor_sampler = NeighborSampler(
+Epoch 1: train_loss=1.1513, val_auc=0.5926
+Epoch 2: train_loss=0.3802, val_auc=0.6062
+Epoch 3: train_loss=0.3718, val_auc=0.6151
+Epoch 4: train_loss=0.3671, val_auc=0.6030
+Epoch 5: train_loss=0.3641, val_auc=0.6002
+Epoch 6: train_loss=0.3617, val_auc=0.6245
+Epoch 7: train_loss=0.3597, val_auc=0.6138
+Epoch 8: train_loss=0.3580, val_auc=0.6209
+Epoch 9: train_loss=0.3571, val_auc=0.6146
+Epoch 10: train_loss=0.3564, val_auc=0.6221
+Epoch 11: train_loss=0.3555, val_auc=0.6226
+Epoch 12: train_loss=0.3536, val_auc=0.6230
+Epoch 13: train_loss=0.3511, val_auc=0.6315
+Epoch 14: train_loss=0.3486, val_auc=0.6607
+Epoch 15: train_loss=0.3447, val_auc=0.6878
+Epoch 16: train_loss=0.3416, val_auc=0.6956
+Epoch 17: train_loss=0.3401, val_auc=0.6955
+Epoch 18: train_loss=0.3395, val_auc=0.7090
+Epoch 19: train_loss=0.3378, val_auc=0.7081
+Epoch 20: train_loss=0.3374, val_auc=0.7075
+[Hybrid] Training graphsage_xgb on embeddings with shape (86619, 128)
+[Hybrid] graphsage_xgb: val_auc=0.7633, test_auc=0.7069
