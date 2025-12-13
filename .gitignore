@@ -2,6 +2,7 @@ data/
 .config/
 models/
 models_strong/
+ProteoTrace.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
