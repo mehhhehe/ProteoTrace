@@ -13,7 +13,7 @@ import torch
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
 from train import train_gnn
 from train_hybrid import (
-    build_graphsage_encoder,
+    build_gat_encoder,
     compute_embeddings,
     train_hybrid_classifier,
 )
@@ -28,6 +28,7 @@ def run_gnn_and_hybrid_sensitivity(
     values: List[int],
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     num_neighbors: List[int],
     batch_size: int,
     epochs: int,
@@ -35,13 +36,13 @@ def run_gnn_and_hybrid_sensitivity(
 ) -> List[Dict]:
     """
     Hyperparameter sensitivity for BOTH:
-      - pure GraphSAGE (train_gnn)
-      - hybrid GraphSAGE+XGBoost (train_hybrid_classifier from train_hybrid.py)
+      - pure GAT (train_gnn)
+      - hybrid GAT+XGBoost (train_hybrid_classifier from train_hybrid.py)
 
     For each value in `values`, we:
-      1) Train GraphSAGE with that hyperparameter setting and save checkpoint +
+      1) Train GAT with that hyperparameter setting and save checkpoint +
          probability matrices in a per-config subdirectory.
-      2) Load the GraphSAGE checkpoint as an encoder (build_graphsage_encoder).
+      2) Load the GAT checkpoint as an encoder (build_gat_encoder).
       3) Compute embeddings (compute_embeddings) and train an XGBoost hybrid
          classifier on top (train_hybrid_classifier).
     """
@@ -59,6 +60,7 @@ def run_gnn_and_hybrid_sensitivity(
         # Start from baseline configuration
         hdim = hidden_dim
         nlayers = num_layers
+        attn_heads = heads
         nneigh = list(num_neighbors)
         bs = batch_size
         nepochs = epochs
@@ -74,6 +76,8 @@ def run_gnn_and_hybrid_sensitivity(
         elif param == "num_neighbors":
             # same neighbour count for each layer
             nneigh = [int(v)] * nlayers
+        elif param == "heads":
+            attn_heads = int(v)
         elif param == "batch_size":
             bs = int(v)
         elif param == "epochs":
@@ -91,7 +95,7 @@ def run_gnn_and_hybrid_sensitivity(
             f"batch_size={bs}, epochs={nepochs})"
         )
 
-        # --- 1) Train GraphSAGE for this configuration ---
+        # --- 1) Train GAT for this configuration ---
         (
             _train_probs_gnn,
             _val_probs_gnn,
@@ -107,6 +111,7 @@ def run_gnn_and_hybrid_sensitivity(
             test_idx=test_idx,
             hidden_dim=hdim,
             num_layers=nlayers,
+            heads=attn_heads,
             num_neighbors=nneigh,
             batch_size=bs,
             epochs=nepochs,
@@ -120,10 +125,11 @@ def run_gnn_and_hybrid_sensitivity(
         hybrid_error: str | None = None
 
         try:
-            encoder = build_graphsage_encoder(
+            encoder = build_gat_encoder(
                 input_dim=features.shape[1],
                 hidden_dim=hdim,
                 num_layers=nlayers,
+                heads=attn_heads,
                 model_dir=cfg_model_dir,
                 device=device,
             )
@@ -149,6 +155,7 @@ def run_gnn_and_hybrid_sensitivity(
             # full config used
             "hidden_dim": int(hdim),
             "num_layers": int(nlayers),
+            "heads": int(attn_heads),
             "num_neighbors": [int(x) for x in nneigh],
             "batch_size": int(bs),
             "epochs": int(nepochs),
@@ -169,7 +176,7 @@ def run_gnn_and_hybrid_sensitivity(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hyperparameter sensitivity for GraphSAGE and hybrid XGB on ogbn-proteins."
+        description="Hyperparameter sensitivity for GAT and hybrid XGB on ogbn-proteins."
     )
     parser.add_argument(
         "--root",
@@ -200,7 +207,7 @@ def main() -> None:
         "--param",
         type=str,
         default="hidden_dim",
-        choices=["hidden_dim", "num_layers", "num_neighbors", "batch_size", "epochs"],
+        choices=["hidden_dim", "num_layers", "heads", "num_neighbors", "batch_size", "epochs"],
         help="Hyperparameter to vary.",
     )
     parser.add_argument(
@@ -214,6 +221,7 @@ def main() -> None:
     # Baseline configuration around which we vary one parameter
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=2)
+    parser.add_argument("--heads", type=int, default=2)
     parser.add_argument(
         "--num_neighbors",
         type=int,
@@ -240,6 +248,7 @@ def main() -> None:
         values=args.values,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
+        heads=args.heads,
         num_neighbors=args.num_neighbors,
         batch_size=args.batch_size,
         epochs=args.epochs,

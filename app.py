@@ -1,8 +1,8 @@
 """Flask web application for the ogbn‑proteins dashboard.
 
 This application provides an interactive interface to explore
-predictions from both a simple baseline model and a GraphSAGE model on
-the ogbn‑proteins dataset.  Users can select a protein node from a
+predictions from both a simple baseline model and a GAT model on the
+ogbn‑proteins dataset.  Users can select a protein node from a
 dropdown, inspect the top predicted functions (labels) from each
 model, and visualise a small neighbourhood of the node.  The layout
 and structure mirror the TruthTrace dashboard but are adapted for
@@ -39,8 +39,8 @@ def load_prediction_arrays(model_dir: str, dataset: ProteinsDataset) -> Tuple[np
     -------
     baseline_pred, gnn_pred : np.ndarray
         Matrices of shape [num_nodes, 112] containing probabilities
-        from the baseline and GraphSAGE models.  If files are
-        missing, arrays of zeros are returned.
+        from the baseline and GAT models.  If files are missing,
+        arrays of zeros are returned.
     """
     num_nodes = dataset.num_nodes
     num_labels = dataset.labels.shape[1]
@@ -61,9 +61,9 @@ def load_prediction_arrays(model_dir: str, dataset: ProteinsDataset) -> Tuple[np
         test_probs = np.load(base_test_path)
         baseline_pred[dataset.split_idx["test"]] = test_probs
     # Load GNN probabilities
-    gnn_train_path = os.path.join(model_dir, "graphsage_probs_train.npy")
-    gnn_val_path = os.path.join(model_dir, "graphsage_probs_val.npy")
-    gnn_test_path = os.path.join(model_dir, "graphsage_probs_test.npy")
+    gnn_train_path = os.path.join(model_dir, "gat_probs_train.npy")
+    gnn_val_path = os.path.join(model_dir, "gat_probs_val.npy")
+    gnn_test_path = os.path.join(model_dir, "gat_probs_test.npy")
     if os.path.exists(gnn_train_path):
         train_probs = np.load(gnn_train_path)
         gnn_pred[dataset.split_idx["train"]] = train_probs

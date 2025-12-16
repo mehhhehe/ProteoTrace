@@ -129,23 +129,23 @@ def main() -> None:
 
     # Load probability matrices
     baseline_probs = load_probs(args.model_dir, "baseline", args.split)
-    gnn_probs = load_probs(args.model_dir, "graphsage", args.split)
+    gnn_probs = load_probs(args.model_dir, "gat", args.split)
 
     results = []
 
     # Baseline vs GNN
-    print("[Significance] Baseline vs GraphSAGE")
+    print("[Significance] Baseline vs GAT")
     res_bg = compare_models(
         y_true,
         baseline_probs,
         gnn_probs,
         name_a="baseline",
-        name_b="graphsage",
+        name_b="gat",
     )
     results.append(res_bg)
 
     # Hybrid XGB if available
-    xgb_path = os.path.join(args.model_dir, f"graphsage_xgb_probs_{args.split}.npy")
+    xgb_path = os.path.join(args.model_dir, f"gat_xgb_probs_{args.split}.npy")
     if os.path.exists(xgb_path):
         hybrid_probs = np.load(xgb_path)
         print("[Significance] Baseline vs Hybrid XGB")
@@ -154,17 +154,17 @@ def main() -> None:
             baseline_probs,
             hybrid_probs,
             name_a="baseline",
-            name_b="graphsage_xgb",
+            name_b="gat_xgb",
         )
         results.append(res_bh)
 
-        print("[Significance] GraphSAGE vs Hybrid XGB")
+        print("[Significance] GAT vs Hybrid XGB")
         res_gh = compare_models(
             y_true,
             gnn_probs,
             hybrid_probs,
-            name_a="graphsage",
-            name_b="graphsage_xgb",
+            name_a="gat",
+            name_b="gat_xgb",
         )
         results.append(res_gh)
     else:

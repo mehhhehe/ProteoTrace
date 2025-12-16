@@ -1,13 +1,13 @@
 """Training script for the ogbn‑proteins TruthTrace‑style implementation.
 
-This script trains both a simple non‑graph baseline and a GraphSAGE
-classifier on the ogbn‑proteins dataset.  It mirrors the design of
-the TruthTrace training pipeline but is adapted to run on CPU‑only
-machines with limited memory.  The baseline model is a one‑vs‑rest
-logistic regression classifier trained on aggregated node features.
-The GNN model is a two‑layer GraphSAGE network trained with
-mini‑batch neighbour sampling.  Predictions for all nodes are saved
-to disk for use in the web dashboard.
+This script trains both a simple non‑graph baseline and a Graph
+Attention Network (GAT) classifier on the ogbn‑proteins dataset.  It
+mirrors the design of the TruthTrace training pipeline but is adapted
+to run on CPU‑only machines with limited memory.  The baseline model is
+a one‑vs‑rest logistic regression classifier trained on aggregated node
+features.  The GNN model is a multi‑layer GAT trained with mini‑batch
+neighbour sampling.  Predictions for all nodes are saved to disk for
+use in the web dashboard.
 
 Usage examples:
 
@@ -15,7 +15,7 @@ Usage examples:
 
    python train.py --root ./data \
      --agg_method mean --add_degree --model_dir models \
-     --epochs 5 --hidden_dim 64 --num_layers 2 \
+     --epochs 5 --hidden_dim 64 --num_layers 2 --heads 2 \
      --batch_size 256 --num_neighbors 10 10
 
 The above will train both the baseline and GNN on the
@@ -37,7 +37,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch_geometric.data import Data
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import GATConv
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
@@ -115,28 +115,29 @@ def train_baseline(
     return train_probs, val_probs, test_probs, val_auc, test_auc
 
 
-class GraphSAGE(nn.Module):
-    """Two‑layer GraphSAGE model for multi‑label classification.
+class GAT(nn.Module):
+    """Lightweight multi‑layer Graph Attention Network classifier."""
 
-    This implementation uses mean aggregation and a final linear layer
-    to produce 112 logits per node.  Dropout is applied between
-    layers.  The design mirrors the TruthTrace GAT model but uses
-    GraphSAGE, which is lighter and suitable for CPU training.
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int = 2, dropout: float = 0.2) -> None:
+    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int = 2,
+                 heads: int = 2, dropout: float = 0.2) -> None:
         super().__init__()
-        self.convs: List[SAGEConv] = nn.ModuleList()
-        self.convs.append(SAGEConv(input_dim, hidden_dim))
-        for _ in range(num_layers - 1):
-            self.convs.append(SAGEConv(hidden_dim, hidden_dim))
+        self.convs: List[GATConv] = nn.ModuleList()
         self.dropout = dropout
+
+        # First layer
+        self.convs.append(GATConv(input_dim, hidden_dim, heads=heads, dropout=dropout))
+        # Intermediate layers (if any)
+        for _ in range(num_layers - 2):
+            self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout))
+        # Final layer with single head
+        self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=dropout))
+
         self.lin = nn.Linear(hidden_dim, 112)
 
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         for conv in self.convs:
             x = conv(x, edge_index)
-            x = F.relu(x)
+            x = F.elu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         out = self.lin(x)
         return out
@@ -151,13 +152,14 @@ def train_gnn(
     test_idx: np.ndarray,
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     num_neighbors: List[int],
     batch_size: int,
     epochs: int,
     model_dir: str,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
-    """Train a GraphSAGE model with neighbour sampling and evaluate it.
+    """Train a GAT model with neighbour sampling and evaluate it.
 
     Parameters
     ----------
@@ -168,9 +170,11 @@ def train_gnn(
     train_idx, val_idx, test_idx : np.ndarray
         Node indices for training, validation and testing.
     hidden_dim : int
-        Hidden dimension of the GraphSAGE layers.
+        Hidden dimension per attention head.
     num_layers : int
-        Number of GraphSAGE layers.
+        Number of GAT layers.
+    heads : int
+        Number of attention heads used in intermediate layers.
     num_neighbors : list[int]
         Number of sampled neighbours per layer for neighbour sampling.
     batch_size : int
@@ -230,7 +234,12 @@ def train_gnn(
         shuffle=False,
     )
     # Initialise model and optimiser
-    model = GraphSAGE(input_dim=x.size(1), hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+    model = GAT(
+        input_dim=x.size(1),
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
+        heads=heads,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-4)
     criterion = nn.BCEWithLogitsLoss()
     best_val_auc = 0.0
@@ -303,21 +312,22 @@ def train_gnn(
     final_val_auc = roc_auc_score(labels[val_idx], val_probs, average="macro")
     final_test_auc = roc_auc_score(labels[test_idx], test_probs, average="macro")
     # Save model and probabilities
-    torch.save(model.state_dict(), os.path.join(model_dir, "graphsage_classifier.pth"))
-    np.save(os.path.join(model_dir, "graphsage_probs_train.npy"), train_probs)
-    np.save(os.path.join(model_dir, "graphsage_probs_val.npy"), val_probs)
-    np.save(os.path.join(model_dir, "graphsage_probs_test.npy"), test_probs)
+    torch.save(model.state_dict(), os.path.join(model_dir, "gat_classifier.pth"))
+    np.save(os.path.join(model_dir, "gat_probs_train.npy"), train_probs)
+    np.save(os.path.join(model_dir, "gat_probs_val.npy"), val_probs)
+    np.save(os.path.join(model_dir, "gat_probs_test.npy"), test_probs)
     return train_probs, val_probs, test_probs, final_val_auc, final_test_auc
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train baseline and GraphSAGE models on ogbn-proteins")
+    parser = argparse.ArgumentParser(description="Train baseline and GAT models on ogbn-proteins")
     parser.add_argument("--root", type=str, required=True, help="Root directory containing ogbn-proteins/raw")
     parser.add_argument("--model_dir", type=str, required=True, help="Directory to save models and predictions")
     parser.add_argument("--agg_method", type=str, default="mean", choices=["mean", "sum"], help="Edge feature aggregation method")
     parser.add_argument("--no_add_degree", action="store_true", help="Do not append degree and log-degree features")
-    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension for GraphSAGE")
-    parser.add_argument("--num_layers", type=int, default=2, help="Number of GraphSAGE layers")
+    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension per GAT head")
+    parser.add_argument("--num_layers", type=int, default=2, help="Number of GAT layers")
+    parser.add_argument("--heads", type=int, default=2, help="Attention heads for intermediate GAT layers")
     parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for neighbour sampling")
     parser.add_argument("--num_neighbors", type=int, nargs='+', default=[25, 10], help="Number of sampled neighbours per GNN layer")
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
@@ -337,7 +347,7 @@ def main() -> None:
         args.model_dir,
     )
     print(f"Baseline ROC-AUC: val={val_auc_base:.4f}, test={test_auc_base:.4f}")
-    # Train GraphSAGE classifier
+    # Train GAT classifier
     device = torch.device("cpu")
     train_probs_gnn, val_probs_gnn, test_probs_gnn, val_auc_gnn, test_auc_gnn = train_gnn(
         graph,
@@ -348,13 +358,14 @@ def main() -> None:
         split_idx["test"],
         args.hidden_dim,
         args.num_layers,
+        args.heads,
         args.num_neighbors,
         args.batch_size,
         args.epochs,
         args.model_dir,
         device,
     )
-    print(f"GraphSAGE ROC-AUC: val={val_auc_gnn:.4f}, test={test_auc_gnn:.4f}")
+    print(f"GAT ROC-AUC: val={val_auc_gnn:.4f}, test={test_auc_gnn:.4f}")
 
     print("Training complete. Predictions saved to", args.model_dir)
 

@@ -11,8 +11,8 @@ import numpy as np
 import torch
 
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
-from train import train_baseline, train_gnn, GraphSAGE
-from shap_analysis import build_graphsage_encoder, compute_embeddings  # reuse
+from train import train_baseline, train_gnn
+from shap_analysis import build_gat_encoder, compute_embeddings  # reuse
 
 
 from train_hybrid import train_hybrid_classifier  # from the earlier file
@@ -53,6 +53,7 @@ def run_gnn_and_hybrid_config(
     add_degree: bool,
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     num_neighbors: List[int],
     batch_size: int,
     epochs: int,
@@ -71,6 +72,7 @@ def run_gnn_and_hybrid_config(
         split_idx["test"],
         hidden_dim,
         num_layers,
+        heads,
         num_neighbors,
         batch_size,
         epochs,
@@ -93,10 +95,11 @@ def run_gnn_and_hybrid_config(
 
     # 2) Hybrid GNN + XGB (if xgboost is available)
     try:
-        encoder = build_graphsage_encoder(
+        encoder = build_gat_encoder(
             input_dim=features.shape[1],
             hidden_dim=hidden_dim,
             num_layers=num_layers,
+            heads=heads,
             model_dir=out_dir,
             device=device,
         )
@@ -129,6 +132,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[15, 15, 10])
+    parser.add_argument("--heads", type=int, default=2)
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -177,6 +181,7 @@ def main() -> None:
             add_degree=add_degree,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
+            heads=args.heads,
             num_neighbors=args.num_neighbors,
             batch_size=args.batch_size,
             epochs=args.epochs,

@@ -1,6 +1,6 @@
 """Hybrid GNN + classical training for ogbn-proteins (BioGraphFusion).
 
-This script takes a *pre-trained* GraphSAGE model (trained via train.py),
+This script takes a *pre-trained* GAT model (trained via train.py),
 uses it as an encoder to generate node embeddings, and then trains
 classical multi-label classifiers on those embeddings:
 
@@ -47,31 +47,32 @@ except ImportError:
     xgb = None
 
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
-from train import GraphSAGE  # reuse the same architecture / state_dict
+from train import GAT  # reuse the same architecture / state_dict
 
 
-def build_graphsage_encoder(
+def build_gat_encoder(
     input_dim: int,
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     model_dir: str,
     device: torch.device,
 ) -> nn.Module:
-    """Load the trained GraphSAGE classifier and return it as an encoder.
+    """Load the trained GAT classifier and return it as an encoder.
 
-    We reuse the GraphSAGE class from train.py, load the state_dict
-    from `graphsage_classifier.pth`, and then use the conv stack as
+    We reuse the GAT class from train.py, load the state_dict
+    from `gat_classifier.pth`, and then use the conv stack as
     an encoder. The final linear layer is ignored when computing
     embeddings.
     """
-    ckpt_path = os.path.join(model_dir, "graphsage_classifier.pth")
+    ckpt_path = os.path.join(model_dir, "gat_classifier.pth")
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(
-            f"Expected GraphSAGE checkpoint at {ckpt_path}. "
+            f"Expected GAT checkpoint at {ckpt_path}. "
             "Run train.py first to train the GNN."
         )
 
-    model = GraphSAGE(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers)
+    model = GAT(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, heads=heads)
     state = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(state)
     model.to(device)
@@ -85,7 +86,7 @@ def compute_embeddings(
     graph: Dict[str, np.ndarray],
     device: torch.device,
 ) -> np.ndarray:
-    """Compute node embeddings for all nodes using the trained GraphSAGE.
+    """Compute node embeddings for all nodes using the trained GAT.
 
     We pass the full graph through the conv stack and take the output
     *before* the final linear layer as the embedding.
@@ -98,7 +99,7 @@ def compute_embeddings(
         h = x
         for conv in model.convs:  # type: ignore[attr-defined]
             h = conv(h, edge_index)
-            h = F.relu(h)
+            h = F.elu(h)
             h = F.dropout(h, p=model.dropout, training=False)  # type: ignore[attr-defined]
 
     embeddings = h.cpu().numpy()
@@ -162,7 +163,7 @@ def train_hybrid_classifier(
             solver="lbfgs",
         )
         clf = OneVsRestClassifier(base_est, n_jobs=-1)
-        tag = "graphsage_logreg"
+        tag = "gat_logreg"
     elif clf_name == "rf":
         base_est = RandomForestClassifier(
             n_estimators=300,
@@ -172,7 +173,7 @@ def train_hybrid_classifier(
         )
         # RandomForest can handle multi-label with OneVsRest as well
         clf = OneVsRestClassifier(base_est, n_jobs=1)
-        tag = "graphsage_rf"
+        tag = "gat_rf"
     elif clf_name == "xgb":
         if xgb is None:
             raise ImportError(
@@ -190,7 +191,7 @@ def train_hybrid_classifier(
             objective="binary:logistic",
         )
         clf = OneVsRestClassifier(base_est, n_jobs=1)
-        tag = "graphsage_xgb"
+        tag = "gat_xgb"
     else:
         raise ValueError(f"Unsupported classifier: {classifier}")
 
@@ -228,7 +229,7 @@ def train_hybrid_classifier(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Train hybrid GraphSAGE + classical models on ogbn-proteins embeddings"
+        description="Train hybrid GAT + classical models on ogbn-proteins embeddings"
     )
     parser.add_argument(
         "--root",
@@ -240,7 +241,7 @@ def main() -> None:
         "--model_dir",
         type=str,
         required=True,
-        help="Directory with GraphSAGE checkpoint and where hybrid models will be saved",
+        help="Directory with GAT checkpoint and where hybrid models will be saved",
     )
     parser.add_argument(
         "--agg_method",
@@ -258,13 +259,19 @@ def main() -> None:
         "--hidden_dim",
         type=int,
         default=128,
-        help="Hidden dimension used when training GraphSAGE (must match)",
+        help="Hidden dimension used when training GAT (must match)",
     )
     parser.add_argument(
         "--num_layers",
         type=int,
         default=2,
-        help="Number of GraphSAGE layers used during training (must match)",
+        help="Number of GAT layers used during training (must match)",
+    )
+    parser.add_argument(
+        "--heads",
+        type=int,
+        default=2,
+        help="Attention heads used when training the GAT (must match)",
     )
     parser.add_argument(
         "--classifier",
@@ -286,10 +293,11 @@ def main() -> None:
     )
 
     # Build encoder and compute embeddings
-    encoder = build_graphsage_encoder(
+    encoder = build_gat_encoder(
         input_dim=features.shape[1],
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
+        heads=args.heads,
         model_dir=args.model_dir,
         device=device,
     )

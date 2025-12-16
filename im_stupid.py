@@ -18,7 +18,7 @@ def collect_sensitivity_results(
 ) -> List[Dict[str, Any]]:
     """
     Inspect saved sensitivity run directories and compute AUC metrics
-    for both GraphSAGE and the GraphSAGE+XGB hybrid (if available).
+    for both GAT and the GAT+XGB hybrid (if available).
 
     Expected directory structure (per param/value):
 
@@ -26,10 +26,10 @@ def collect_sensitivity_results(
           sensitivity_runs/
             <param>/
               <value>/
-                graphsage_probs_val.npy
-                graphsage_probs_test.npy
-                graphsage_xgb_probs_val.npy   (optional)
-                graphsage_xgb_probs_test.npy  (optional)
+                gat_probs_val.npy
+                gat_probs_test.npy
+                gat_xgb_probs_val.npy   (optional)
+                gat_xgb_probs_test.npy  (optional)
 
     Parameters
     ----------
@@ -94,11 +94,11 @@ def collect_sensitivity_results(
             print(f"[Collect] Processing {param_name}={value_name} in {cfg_dir}")
 
             # --- GNN metrics ---
-            gnn_val_path = os.path.join(cfg_dir, "graphsage_probs_val.npy")
-            gnn_test_path = os.path.join(cfg_dir, "graphsage_probs_test.npy")
+            gnn_val_path = os.path.join(cfg_dir, "gat_probs_val.npy")
+            gnn_test_path = os.path.join(cfg_dir, "gat_probs_test.npy")
 
             if not (os.path.exists(gnn_val_path) and os.path.exists(gnn_test_path)):
-                print(f"  [WARN] Missing GraphSAGE prob files in {cfg_dir}, skipping.")
+                print(f"  [WARN] Missing GAT prob files in {cfg_dir}, skipping.")
                 continue
 
             val_probs_gnn = np.load(gnn_val_path)
@@ -112,8 +112,8 @@ def collect_sensitivity_results(
             )
 
             # --- Hybrid metrics (optional) ---
-            hyb_val_path = os.path.join(cfg_dir, "graphsage_xgb_probs_val.npy")
-            hyb_test_path = os.path.join(cfg_dir, "graphsage_xgb_probs_test.npy")
+            hyb_val_path = os.path.join(cfg_dir, "gat_xgb_probs_val.npy")
+            hyb_test_path = os.path.join(cfg_dir, "gat_xgb_probs_test.npy")
 
             hybrid_xgb_available = os.path.exists(hyb_val_path) and os.path.exists(
                 hyb_test_path
@@ -152,7 +152,7 @@ def collect_sensitivity_results(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Collect sensitivity metrics from saved GraphSAGE and hybrid models "
+            "Collect sensitivity metrics from saved GAT and hybrid models "
             "under model_dir/sensitivity_runs and write sensitivity.json."
         )
     )

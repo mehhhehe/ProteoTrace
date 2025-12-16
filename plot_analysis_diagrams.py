@@ -429,11 +429,11 @@ def main() -> None:
     parser.add_argument(
         "--shap_model_tag",
         type=str,
-        default="graphsage_xgb",
+        default="gat_xgb",
         help=(
             "Which hybrid model tag to use for SHAP plots "
             "(must match the tag used in shap_analysis.py, "
-            "e.g. 'graphsage_xgb' or 'graphsage_rf')."
+            "e.g. 'gat_xgb' or 'gat_rf')."
         ),
     )
     parser.add_argument(

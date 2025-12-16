@@ -17,7 +17,7 @@ from torch_geometric.data import Data
 from sklearn.metrics import roc_auc_score
 
 from data_loader import load_raw_ogbn_proteins, aggregate_edge_features
-from train import GraphSAGE  # reuse architecture
+from train import GAT  # reuse architecture
 
 try:
     import shap
@@ -30,20 +30,21 @@ except ImportError:
     xgb = None
 
 
-def build_graphsage_encoder(
+def build_gat_encoder(
     input_dim: int,
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     model_dir: str,
     device: torch.device,
 ) -> nn.Module:
-    ckpt_path = os.path.join(model_dir, "graphsage_classifier.pth")
+    ckpt_path = os.path.join(model_dir, "gat_classifier.pth")
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(
-            f"GraphSAGE checkpoint not found at {ckpt_path}. "
+            f"GAT checkpoint not found at {ckpt_path}. "
             "Run train.py first."
         )
-    model = GraphSAGE(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers)
+    model = GAT(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, heads=heads)
     state = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(state)
     model.to(device)
@@ -64,7 +65,7 @@ def compute_embeddings(
         h = x
         for conv in model.convs:  # type: ignore[attr-defined]
             h = conv(h, edge_index)
-            h = F.relu(h)
+            h = F.elu(h)
             h = F.dropout(h, p=model.dropout, training=False)  # type: ignore[attr-defined]
     return h.cpu().numpy()
 
@@ -114,6 +115,7 @@ def run_shap_analysis(
     add_degree: bool,
     hidden_dim: int,
     num_layers: int,
+    heads: int,
     model_tag: str,
     split: str,
     nsamples: int,
@@ -127,10 +129,11 @@ def run_shap_analysis(
     features = aggregate_edge_features(graph, method=agg_method, add_degree=add_degree)
 
     # Encoder
-    encoder = build_graphsage_encoder(
+    encoder = build_gat_encoder(
         input_dim=features.shape[1],
         hidden_dim=hidden_dim,
         num_layers=num_layers,
+        heads=heads,
         model_dir=model_dir,
         device=device,
     )
@@ -203,15 +206,16 @@ def run_shap_analysis(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SHAP analysis for hybrid GraphSAGE + tree-based models")
+    parser = argparse.ArgumentParser(description="SHAP analysis for hybrid GAT + tree-based models")
     parser.add_argument("--root", type=str, required=True)
     parser.add_argument("--model_dir", type=str, required=True)
     parser.add_argument("--agg_method", type=str, default="mean", choices=["mean", "sum"])
     parser.add_argument("--no_add_degree", action="store_true")
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--num_layers", type=int, default=2)
-    parser.add_argument("--model_tag", type=str, default="graphsage_xgb",
-                        choices=["graphsage_xgb", "graphsage_rf"])
+    parser.add_argument("--heads", type=int, default=2)
+    parser.add_argument("--model_tag", type=str, default="gat_xgb",
+                        choices=["gat_xgb", "gat_rf"])
     parser.add_argument("--split", type=str, default="valid", choices=["train", "valid", "test"])
     parser.add_argument("--nsamples", type=int, default=2000, help="Number of nodes to sample for SHAP")
     parser.add_argument("--max_labels", type=int, default=20, help="Number of labels to analyse")
@@ -225,6 +229,7 @@ def main() -> None:
         add_degree=not args.no_add_degree,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
+        heads=args.heads,
         model_tag=args.model_tag,
         split=args.split,
         nsamples=args.nsamples,

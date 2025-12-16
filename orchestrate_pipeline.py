@@ -5,7 +5,7 @@ orchestrate_pipeline.py
 End-to-end orchestration script for the BioGraphFusion / ogbn-proteins project.
 
 This script can:
-  1. Train baseline + GraphSAGE (train.py)
+  1. Train baseline + GAT (train.py)
   2. Train hybrid models on GNN embeddings (train_hybrid.py)
   3. Run SHAP analysis on a tree-based hybrid (shap_analysis.py)
   4. Run ablation study (ablation_study.py)
@@ -62,19 +62,21 @@ def main() -> None:
                         help="Do not append degree/log-degree to features")
 
     parser.add_argument("--hidden_dim", type=int, default=128,
-                        help="Hidden dimension for GraphSAGE")
+                        help="Hidden dimension per GAT head")
     parser.add_argument("--num_layers", type=int, default=2,
-                        help="Number of GraphSAGE layers")
+                        help="Number of GAT layers")
+    parser.add_argument("--heads", type=int, default=2,
+                        help="Attention heads for GAT")
     parser.add_argument("--batch_size", type=int, default=256,
                         help="Batch size for neighbour sampling")
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[25, 10],
                         help="Neighbours sampled per GNN layer")
     parser.add_argument("--epochs", type=int, default=20,
-                        help="Training epochs for GraphSAGE (train.py and ablation GNNs)")
+                        help="Training epochs for GAT (train.py and ablation GNNs)")
 
     # SHAP-specific
-    parser.add_argument("--shap_model_tag", type=str, default="graphsage_xgb",
-                        choices=["graphsage_xgb", "graphsage_rf"],
+    parser.add_argument("--shap_model_tag", type=str, default="gat_xgb",
+                        choices=["gat_xgb", "gat_rf"],
                         help="Which hybrid model to analyse with SHAP")
     parser.add_argument("--shap_split", type=str, default="valid", choices=["train", "valid", "test"],
                         help="Split to use for SHAP analysis")
@@ -102,7 +104,7 @@ def main() -> None:
     # Sensitivity-specific
     parser.add_argument(
         "--sens_param", type=str, default="hidden_dim",
-        choices=["hidden_dim", "num_layers", "num_neighbors", "batch_size", "epochs"],
+        choices=["hidden_dim", "num_layers", "heads", "num_neighbors", "batch_size", "epochs"],
         help="Hyperparameter to vary in sensitivity analysis",
     )
     parser.add_argument(
@@ -134,7 +136,7 @@ def main() -> None:
     os.makedirs(args.model_dir, exist_ok=True)
     python_exe = sys.executable
 
-    # 1. Train baseline + GraphSAGE
+    # 1. Train baseline + GAT
     if not args.skip_train:
         cmd = [
             python_exe, "train.py",
@@ -143,6 +145,7 @@ def main() -> None:
             "--agg_method", args.agg_method,
             "--hidden_dim", str(args.hidden_dim),
             "--num_layers", str(args.num_layers),
+            "--heads", str(args.heads),
             "--batch_size", str(args.batch_size),
             "--epochs", str(args.epochs),
         ]
@@ -151,9 +154,9 @@ def main() -> None:
         if args.no_add_degree:
             cmd.append("--no_add_degree")
 
-        run_cmd(cmd, "Main training (baseline + GraphSAGE)")
+        run_cmd(cmd, "Main training (baseline + GAT)")
 
-        # 2. Train hybrid models on top of GraphSAGE embeddings
+        # 2. Train hybrid models on top of GAT embeddings
     if not args.skip_hybrid:
         cmd = [
             python_exe, "train_hybrid.py",
@@ -162,14 +165,15 @@ def main() -> None:
             "--agg_method", args.agg_method,
             "--hidden_dim", str(args.hidden_dim),
             "--num_layers", str(args.num_layers),
+            "--heads", str(args.heads),
             "--classifier", "all",
         ]
         if args.no_add_degree:
             cmd.append("--no_add_degree")
 
-        run_cmd(cmd, "Hybrid training (GraphSAGE + classical models)")
+        run_cmd(cmd, "Hybrid training (GAT + classical models)")
 
-    # 3. Sensitivity analysis (GraphSAGE and hybrid)
+    # 3. Sensitivity analysis (GAT and hybrid)
     if not args.skip_sensitivity:
         cmd = [
             python_exe, "sensitivity_analysis.py",
@@ -179,6 +183,7 @@ def main() -> None:
             "--param", args.sens_param,
             "--hidden_dim", str(args.hidden_dim),
             "--num_layers", str(args.num_layers),
+            "--heads", str(args.heads),
             "--batch_size", str(args.batch_size),
             "--epochs", str(args.epochs),
         ]
