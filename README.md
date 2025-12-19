@@ -50,13 +50,16 @@ export PROTEINS_MODEL_DIR=./models
 python app.py
 ```
 
-Then open http://127.0.0.1:5000/ to interact with the dashboard. When selecting a node, the backend retrieves the top predicted functions from both models and emits a 1-hop neighbourhood for visualisation.
+Then open http://127.0.0.1:5000/ to interact with the dashboard. When selecting a node, the backend retrieves the top predicted functions from both models and emits a 1-hop neighbourhood for visualisation. We have so far been unable to test the app properly 
+due to memory constraints.
 
 ## Training and experimentation
 
 Model training and analysis scripts assume the dataset is already cached:
 
-- **Train baseline and GraphSAGE models**: `python train.py` or the hybrid variant `python train_hybrid.py`.
+- **Train baseline and GraphSAGE models**: `python train.py` or the hybrid variant `python train_hybrid.py`. --root param requires 
+the user to enter the dir in which data will be downloaded, 
+while --model_dir requires the user to pass the dir in which models will be saved.
 - **Ablation and sensitivity studies**: run `ablation_study.py` or `sensitivity_analysis.py` after training outputs are saved in `models/`.
 - **Explainability and significance testing**: `shap_analysis.py` and `significance_tests.py` operate on the stored predictions and labels to quantify model behaviour.
 
