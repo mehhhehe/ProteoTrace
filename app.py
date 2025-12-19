@@ -118,8 +118,8 @@ def create_app() -> Flask:
         if nid < 0 or nid >= dataset.num_nodes:
             return jsonify({"error": "Node ID out of range"}), 404
         baseline_vec, gnn_vec = dataset.get_prediction(nid)
-        # Compute top 5 labels for each model
-        topk = 5
+        # Compute top 112 labels for each model
+        topk = 112
         # Baseline top labels
         baseline_indices = np.argsort(baseline_vec)[::-1][:topk]
         baseline_scores = [(int(idx), float(baseline_vec[idx])) for idx in baseline_indices]

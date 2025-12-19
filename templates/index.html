@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ProteoTrace Dashboard</title>
+
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    .row { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    h2 { font-size: 16px; margin: 0 0 10px; }
+    label { display: block; font-size: 13px; margin-bottom: 6px; }
+    select, button { width: 100%; padding: 10px; font-size: 14px; }
+    button { margin-top: 10px; cursor: pointer; }
+    .muted { color: #666; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; font-size: 13px; }
+    #graph { width: 100%; height: 520px; border: 1px solid #eee; border-radius: 10px; }
+    .err { color: #b00020; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+
+  <!-- Graph renderer (client-side) -->
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <h1>ProteoTrace — ogbn-proteins Dashboard</h1>
+  <p class="muted">
+    Select a node to inspect top predicted labels (baseline vs GNN) and view a small neighborhood graph.
+  </p>
+
+  <div class="row">
+    <div class="card">
+      <h2>Node selection</h2>
+      <label for="nodeSelect">Node ID</label>
+      <select id="nodeSelect">
+        {% for nid in node_ids %}
+          <option value="{{ nid }}">{{ nid }}</option>
+        {% endfor %}
+      </select>
+      <button id="loadBtn">Load</button>
+
+      <div style="margin-top:12px">
+        <div class="muted">Status</div>
+        <div id="status">Ready.</div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="muted">Errors</div>
+        <div id="errors" class="err"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Predictions (Top-5)</h2>
+      <div class="row" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div class="card" style="border-radius: 10px;">
+          <div class="muted" style="margin-bottom:8px;">Baseline</div>
+          <table>
+            <thead><tr><th>Label</th><th>Score</th></tr></thead>
+            <tbody id="baselineTable"></tbody>
+          </table>
+        </div>
+        <div class="card" style="border-radius: 10px;">
+          <div class="muted" style="margin-bottom:8px;">GNN</div>
+          <table>
+            <thead><tr><th>Label</th><th>Score</th></tr></thead>
+            <tbody id="gnnTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <h2 style="margin-top:16px;">Neighborhood graph</h2>
+      <div id="graph"></div>
+      <p class="muted" style="margin-top:8px;">
+        Graph rendered from <code>/graph_json/&lt;node_id&gt;</code> (1-hop, max 50 nodes).
+      </p>
+    </div>
+  </div>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const errEl = document.getElementById("errors");
+  const nodeSelect = document.getElementById("nodeSelect");
+  const loadBtn = document.getElementById("loadBtn");
+  const baselineTable = document.getElementById("baselineTable");
+  const gnnTable = document.getElementById("gnnTable");
+
+  let network = null;
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+  function setError(msg) { errEl.textContent = msg || ""; }
+
+  function fillTable(tbody, rows) {
+    tbody.innerHTML = "";
+    for (const [label, score] of rows) {
+      const tr = document.createElement("tr");
+      const tdL = document.createElement("td");
+      const tdS = document.createElement("td");
+      tdL.textContent = label;
+      tdS.textContent = Number(score).toFixed(6);
+      tr.appendChild(tdL); tr.appendChild(tdS);
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function loadPredictions(nodeId) {
+    const r = await fetch(`/predict/${encodeURIComponent(nodeId)}`);
+    if (!r.ok) throw new Error(`Predict endpoint failed: HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    fillTable(baselineTable, data.baseline || []);
+    fillTable(gnnTable, data.gnn || []);
+  }
+
+  async function loadGraph(nodeId) {
+    const r = await fetch(`/graph_json/${encodeURIComponent(nodeId)}`);
+    if (!r.ok) throw new Error(`Graph endpoint failed: HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    // Expecting something like:
+    // { "nodes": [{"id":..., "label":...}, ...],
+    //   "edges": [{"source":..., "target":...}, ...] }
+    const nodes = (data.nodes || []).map(n => ({
+      id: n.id,
+      label: (n.label !== undefined) ? String(n.label) : String(n.id)
+    }));
+
+    const edges = (data.edges || []).map(e => ({
+      from: e.source ?? e.from,
+      to: e.target ?? e.to
+    }));
+
+    const container = document.getElementById("graph");
+    const visData = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+    const options = {
+      physics: { stabilization: true },
+      interaction: { hover: true },
+      nodes: { shape: "dot" }
+    };
+
+    if (network) network.destroy();
+    network = new vis.Network(container, visData, options);
+  }
+
+  async function loadAll() {
+    const nodeId = nodeSelect.value;
+    setError("");
+    setStatus(`Loading node ${nodeId}...`);
+    try {
+      await loadPredictions(nodeId);
+      await loadGraph(nodeId);
+      setStatus(`Loaded node ${nodeId}.`);
+    } catch (e) {
+      setStatus("Failed.");
+      setError(String(e?.message || e));
+    }
+  }
+
+  loadBtn.addEventListener("click", loadAll);
+
+  // Auto-load first node on page load
+  window.addEventListener("load", loadAll);
+</script>
+</body>
+</html>
