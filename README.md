@@ -47,6 +47,7 @@ Start the Flask server (development mode):
 ```bash
 export PROTEINS_ROOT=./data
 export PROTEINS_MODEL_DIR=./models
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
 python app.py
 ```
 
