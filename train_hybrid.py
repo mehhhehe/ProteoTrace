@@ -1,4 +1,4 @@
-"""Hybrid GNN + classical training for ogbn-proteins (BioGraphFusion).
+"""Hybrid GNN + classical training for ogbn-proteins.
 
 This script takes a *pre-trained* GraphSAGE model (trained via train.py),
 uses it as an encoder to generate node embeddings, and then trains
